@@ -102,11 +102,15 @@ void app_set_configuration(app_configuration *conf) {
 		break;
 
 	case APP_BALANCE:
-		app_balance_start();
+		hw_stop_i2c();
+		app_custom_start();
+		//app_adc_start(true);
+		//app_uartcomm_start();
+		/*app_balance_start();
 		if(appconf.imu_conf.type == IMU_TYPE_INTERNAL){
 			hw_stop_i2c();
 			app_uartcomm_start();
-		}
+		}*/
 		break;
 
 	case APP_NRF:
@@ -120,6 +124,7 @@ void app_set_configuration(app_configuration *conf) {
 #ifdef APP_CUSTOM_TO_USE
 		hw_stop_i2c();
 		app_custom_start();
+		app_uartcomm_start();
 #endif
 		break;
 
