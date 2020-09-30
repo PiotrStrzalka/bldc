@@ -84,7 +84,6 @@ float app_adc_get_voltage2(void) {
 	return read_voltage2;
 }
 
-
 static THD_FUNCTION(adc_thread, arg) {
 	(void)arg;
 
@@ -550,6 +549,7 @@ static THD_FUNCTION(adc_thread, arg) {
 						current_out = utils_map(diff, 0.0, config.tc_max_diff, current_rel, 0.0);
 					}
 				}
+
 
 				if (is_reverse) {
 					mc_interface_set_current_rel(-current_out);

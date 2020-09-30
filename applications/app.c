@@ -103,7 +103,8 @@ void app_set_configuration(app_configuration *conf) {
 
 	case APP_BALANCE:
 		hw_stop_i2c();
-		app_custom_start();
+		app_pas_sensor_init();
+		//app_custom_start();
 		//app_adc_start(true);
 		//app_uartcomm_start();
 		/*app_balance_start();

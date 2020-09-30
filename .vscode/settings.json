@@ -1,0 +1,16 @@
+{
+    "files.associations": {
+        "mc_interface.h": "c",
+        "utils.h": "c",
+        "terminal.h": "c",
+        "encoder.h": "c",
+        "comm_can.h": "c",
+        "hal.h": "c",
+        "hw.h": "c",
+        "commands.h": "c",
+        "timeout.h": "c",
+        "app.h": "c",
+        "ch.h": "c",
+        "board.h": "c"
+    }
+}
