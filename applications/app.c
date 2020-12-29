@@ -25,6 +25,7 @@
 #include "rfhelp.h"
 #include "comm_can.h"
 #include "imu.h"
+#include "app_pas_encoder.h"
 
 // Private variables
 static app_configuration appconf;
@@ -103,8 +104,9 @@ void app_set_configuration(app_configuration *conf) {
 
 	case APP_BALANCE:
 		hw_stop_i2c();
-		app_pas_sensor_init();
-		//app_custom_start();
+		app_pas_encoder_init();
+		//app_pas_sensor_init();
+		app_custom_start();
 		//app_adc_start(true);
 		//app_uartcomm_start();
 		/*app_balance_start();

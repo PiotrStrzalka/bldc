@@ -30,7 +30,9 @@
 #include "hw.h"
 #include "commands.h"
 #include "timeout.h"
-#include "app_pas_sensor.h"
+#include "app_pas_encoder.h"
+#include "mcpwm_foc.h"
+#include "chevents.h"
 
 #include <math.h>
 #include <string.h>
@@ -42,7 +44,6 @@ static THD_WORKING_AREA(fdrive_thread_wa, 2048);
 
 // Private functions
 static void pwm_callback(void);
-static void start_plot(int argc, const char **argv);
 
 // Private variables
 static volatile bool stop_now = true;
@@ -51,27 +52,16 @@ static volatile bool is_running = false;
 // Called when the custom application is started. Start our
 // threads here and set up callbacks.
 void app_custom_start(void) {
-	//mc_interface_set_pwm_callback(pwm_callback);
-	app_pas_sensor_init();
-	//palSetPadMode(HW_PAS_SENSOR_PORT, HW_PAS_SENSOR_PIN, PAL_MODE_INPUT_PULLUP);
-	//palSetPad(HW_PAS_SENSOR_PORT, HW_PAS_SENSOR_PIN);
 	stop_now = false;
 	chThdCreateStatic(fdrive_thread_wa, sizeof(fdrive_thread_wa),
 			NORMALPRIO, fdrive_thread, NULL);
-
-	// Terminal commands for the VESC Tool terminal can be registered.
-	terminal_register_command_callback(
-			"start_plot",
-			"Start plotting custom application 1 - enabled, 0 - disabled",
-			"[d]",
-			start_plot);
 }
 
 // Called when the custom application is stopped. Stop our threads
 // and release callbacks.
 void app_custom_stop(void) {
 	//mc_interface_set_pwm_callback(0);
-	terminal_unregister_callback(start_plot);
+	// terminal_unregister_callback(start_plot);
 
 	stop_now = true;
 	while (is_running) {
@@ -83,74 +73,56 @@ void app_custom_configure(app_configuration *conf) {
 	(void)conf;
 }
 
-inline static void print_test_message(void)
-{
-	static uint32_t i = 0;
-	if(i % 200 == 0U)
-	{
-		commands_printf("Test message: %lu", i);
-	}	
-	i++;
-}
-
-static volatile bool plotEnabled = false;
-
-// Callback function for the terminal command with arguments.
-static void start_plot(int argc, const char **argv) {
-	if (argc == 2) {
-		int d = -1;
-		sscanf(argv[1], "%d", &d);
-
-		commands_printf("You have entered %d", d);
-
-		if(d == 1){
-			if(plotEnabled == false){
-				commands_printf("Enabling plot");
-				commands_init_plot("Sample", "Counter");
-				commands_plot_add_graph("PAS Sensor");				// plot nr 1
-				commands_plot_add_graph("motorStarted");			// plot nr 3		
-				commands_plot_add_graph("Motor Start Threshold");	// plot nr 4
-				plotEnabled = true;
-			}else{
-				commands_printf("Plot is already enabled!");
-			}
-		}else if(d == 0){
-			commands_printf("Disabling plot");
-			plotEnabled = false;
-		}else
-		{
-			commands_printf("Argument is incorrect!");
-		}
-
-		// For example, read the ADC inputs on the COMM header.
-		//commands_printf("ADC1: %.2f V ADC2: %.2f V",
-		//		(double)ADC_VOLTS(ADC_IND_EXT), (double)ADC_VOLTS(ADC_IND_EXT2));
-	} else {
-		commands_printf("This command requires one argument.\n");
-	}
-}
-
 #define THREAD_SLEEP_MS		10
-#define UPDATE_PLOT_TIME	100 
-#define UPDATE_PLOT_CNT		UPDATE_PLOT_TIME/THREAD_SLEEP_MS
 
-#define MOTOR_START_THR		25U
+typedef enum
+{
+    ARMING_NOT_ARMED = 0U,
+    ARMING_ARMED_IDLE,
+    ARMING_ARMED_POWER
+} arming_state_type;
+static const char * arming_state_type_to_string(arming_state_type state)
+{
+    const char * abc = ""; 
+    switch(state)
+    {
+        case ARMING_NOT_ARMED:
+            abc = "ARMING_NOT_ARMED";
+            break;
+        case ARMING_ARMED_IDLE:
+            abc = "ARMING_ARMED_IDLE";
+            break;
+        case ARMING_ARMED_POWER:
+            abc = "ARMING_ARMED_POWER";
+            break;
+        default:
+            break;
+    }
+    return abc;
+}
+
+static void make_motor_bip(void)
+{
+    float curr;
+    float ld_lq_diff;
+    mcpwm_foc_measure_inductance(0.85f, 100, &curr, &ld_lq_diff);
+}
+
+#define PAS_ENCODER_EVENT_MASK                  EVENT_MASK(0)
 
 static THD_FUNCTION(fdrive_thread, arg) {
 	(void)arg;
-
-	static uint8_t previousState = PAL_HIGH;
-	static float samp = 0.0;	
-	static bool motorStarted = FALSE;
-	static uint32_t PAScounter = 0;
-
 	chRegSetThreadName("Fdrive Custom");
-	is_running = true;
-	
-	
-	chThdSleepMilliseconds(10);
-	previousState = palReadPad(HW_PAS_SENSOR_PORT, HW_PAS_SENSOR_PIN);
-	chThdSleepMilliseconds(10);
+    mc_interface_set_pwm_callback(0);
+    
+    static arming_state_type state = ARMING_NOT_ARMED;
+    static arming_state_type previous_state = ARMING_NOT_ARMED;
+    event_listener_t pas_encoder_listener;
+    static int received_event_flag = -1;
+
+    chEvtRegisterMaskWithFlags(&pas_encoder_event_source, &pas_encoder_listener,
+        PAS_ENCODER_EVENT_MASK, PAS_ENCODER_EVENT_FLAG_TURN_BACK);
+
 
 	for(;;) {
 		if (stop_now) {
@@ -160,44 +132,86 @@ static THD_FUNCTION(fdrive_thread, arg) {
 		}
 		timeout_reset(); // Reset timeout if everything is OK.
 
-		mov_type pas_state = PAS_GetCurrentState();
+        eventmask_t event = chEvtWaitOneTimeout(PAS_ENCODER_EVENT_MASK, TIME_IMMEDIATE);
+        if(event & PAS_ENCODER_EVENT_MASK)
+        {
+            eventflags_t flags = chEvtGetAndClearFlags(&pas_encoder_listener);
+            if(flags & PAS_ENCODER_EVENT_FLAG_TURN_BACK)
+            {
+                received_event_flag = PAS_ENCODER_EVENT_FLAG_TURN_BACK;
+            }
+        }
 
-		if(((pas_state == mov_forward) || (pas_state == mov_backward) || (pas_state == mov_unspecified))
-			&& (motorStarted == FALSE))
-		{			
-			motorStarted = TRUE;		
-			commands_printf("t:%.1fms MOTOR START.\n", (float)chVTGetSystemTime()/10.0f);
-		} else if((pas_state == mov_no_movement) && (motorStarted == TRUE)){
-			mc_interface_release_motor();
-			motorStarted = FALSE;
-			commands_printf("t:%.1fms MOTOR STOP.\n", (float)chVTGetSystemTime()/10.0f);
-		}
+        mc_fault_code fault = mc_interface_get_fault();
 
-		if(motorStarted == TRUE){
-			mc_interface_set_current((float)10.0);	//current is limited by current limit in configuration
-		}
-	
-		static int counter = 0;
-		if(plotEnabled == true){
-			counter++;
-			if(counter == UPDATE_PLOT_CNT){
-				counter = 0;
-				commands_plot_set_graph(0);
-				commands_send_plot_points(samp, (float)pas_state);	
-				chThdSleepMilliseconds(1U);
-				commands_plot_set_graph(1);
-				commands_send_plot_points(samp, (float)motorStarted * 10.0);	
-				chThdSleepMilliseconds(1U);
-				commands_plot_set_graph(3);
-				commands_send_plot_points(samp, (float)MOTOR_START_THR);	
-				samp++;					
-			}			
-		}
-		chThdSleepMilliseconds(THREAD_SLEEP_MS-3U);
+        if(fault != FAULT_CODE_NONE)
+        {
+            commands_printf("Fault code detected: %s", mc_interface_fault_to_string(fault));
+            mc_interface_init();
+        }
+        
+
+        switch(state)
+        {
+            case ARMING_NOT_ARMED:
+                if(received_event_flag == PAS_ENCODER_EVENT_FLAG_TURN_BACK)
+                {
+                    received_event_flag = -1;
+                    make_motor_bip();
+                    state = ARMING_ARMED_IDLE;
+                }                
+                break;
+            case ARMING_ARMED_IDLE:
+                if(received_event_flag == PAS_ENCODER_EVENT_FLAG_TURN_BACK)
+                {
+                    received_event_flag = -1;
+                    while(mc_interface_get_rpm() > 1.0f)
+                    {
+                        commands_printf("Waiting for stop, current stop: %f", mc_interface_get_rpm());
+                        /*we cannot bip when motor is running */
+                        chThdSleepMilliseconds(50);
+                    }
+                    make_motor_bip();
+                    chThdSleepMilliseconds(50);
+                    make_motor_bip();
+                    state = ARMING_NOT_ARMED;
+                }
+                if(app_pas_encoder_get_current_state() == MOV_TYPE_MOV_FORWARD)
+                {
+                    commands_printf("motor_start()");
+                    mc_interface_set_current((float)3.0);	
+                    state = ARMING_ARMED_POWER;
+                    //todo sleep below is too long, some counter needed
+                    //chThdSleepMilliseconds(1000);
+                }
+                break;
+            case ARMING_ARMED_POWER:
+                if(app_pas_encoder_get_current_state() != MOV_TYPE_MOV_FORWARD)
+                {
+                    commands_printf("motor_stop()");
+                    mc_interface_release_motor();
+                    state = ARMING_ARMED_IDLE;
+                }
+                break;
+            default:
+                break;
+        }
+        
+        if(state != previous_state)
+        {
+            commands_printf("Fdrive state transition %s -> %s", arming_state_type_to_string(previous_state), 
+                arming_state_type_to_string(state));
+            previous_state = state;
+        }
+
+        timeout_reset();
+        
+		chThdSleepMilliseconds(THREAD_SLEEP_MS);
 	}
 }
 
-static void pwm_callback(void) {
-	// Called for every control iteration in interrupt context.
-}
+// static void pwm_callback(void) {
+// 	// Called for every control iteration in interrupt context.
+// }
+
 

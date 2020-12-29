@@ -6,6 +6,6 @@ APPSRC =	applications/app.c \
 			applications/app_nunchuk.c \
 			applications/app_balance.c \
 			applications/app_custom.c \
-			applications/app_pas_sensor.c
+			applications/app_pas_encoder.c
 
 APPINC = applications
