@@ -26,6 +26,7 @@
 #include "comm_can.h"
 #include "imu.h"
 #include "app_pas_encoder.h"
+#include "app_fdrive.h"
 
 // Private variables
 static app_configuration appconf;
@@ -124,11 +125,19 @@ void app_set_configuration(app_configuration *conf) {
 		break;
 
 	case APP_CUSTOM:
-#ifdef APP_CUSTOM_TO_USE
 		hw_stop_i2c();
+		app_pas_encoder_init();
+		app_fdrive_adc_configure(&appconf.app_adc_conf);
 		app_custom_start();
 		app_uartcomm_start();
-#endif
+
+
+
+// #ifdef APP_CUSTOM_TO_USE
+// 		hw_stop_i2c();
+// 		app_custom_start();
+// 		app_uartcomm_start();
+// #endif
 		break;
 
 	default:

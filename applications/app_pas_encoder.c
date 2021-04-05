@@ -19,16 +19,16 @@ static void pas_plot_init(int argc, const char **argv);
 static void update_plot(uint32_t encoder_position);
 
 #define ENCODER_RELOAD_VALUE        1000
-#define FULL_CIRCLE_ENCODER_STEPS   32U
+#define FULL_CIRCLE_ENCODER_STEPS   24U
 #define SPEED_AVG_CONSTANT          5
 #define THREAD_SLEEP_TIME           50U
-#define BACKWARD_MOVEMENT_TURN_THR  -32
+#define BACKWARD_MOVEMENT_TURN_THR  -24
 #define MOV_FORWARD_SPEED_THR       70.0f
 #define MOV_BACKWARD_SPEED_THR      -70.0f
 #define MOV_SPEED_HYSTERESIS        30.0f
 
 event_source_t pas_encoder_event_source;
-mov_type_enum state = MOV_TYPE_NO_MOVE_OR_TOO_SLOW;
+static mov_type_enum state = MOV_TYPE_NO_MOVE_OR_TOO_SLOW;
 
 void app_pas_encoder_init(void)
 {
@@ -51,10 +51,10 @@ void app_pas_encoder_deinit(void)
     //todo strzalkap - disable interrupt here
 }
 
-static const char * mov_state_type_to_string(mov_type_enum state)
+static const char * mov_state_type_to_string(mov_type_enum st)
 {
     const char * abc = ""; 
-    switch(state)
+    switch(st)
     {
         case MOV_TYPE_NO_MOVE_OR_TOO_SLOW:
             abc = "MOV_TYPE_NO_MOVE_OR_TOO_SLOW";
@@ -171,11 +171,11 @@ static void calculate_action_from_position(uint32_t encoder_position){
             break;
     }
 
-    if(state != previous_state)
-    {
-        commands_printf("State transition %s -> %s", 
-            mov_state_type_to_string(previous_state), mov_state_type_to_string(state));
-    }
+    // if(state != previous_state)
+    // {
+    //     commands_printf("State transition %s -> %s", 
+    //         mov_state_type_to_string(previous_state), mov_state_type_to_string(state));
+    // }
     
     if(state == MOV_TYPE_MOV_BACKWARD)
     {
@@ -189,10 +189,6 @@ static void calculate_action_from_position(uint32_t encoder_position){
             {
                 send_event_about_turn_back();
                 commands_printf("Turn back detected");
-                //different task should call method below because it contains a lot of sleep functions
-                // float curr;
-                // float ld_lq_diff;
-                // mcpwm_foc_measure_inductance(0.8f, 200, &curr, &ld_lq_diff);
                 turn_back_detected = true;
             }
         }       
@@ -206,12 +202,14 @@ static void calculate_action_from_position(uint32_t encoder_position){
     previous_state = state;
 }
 
+static uint32_t encoder_position = 0U;
+
 static THD_FUNCTION(pas_encoder_thread, arg){
     (void)arg;
     chRegSetThreadName("PAS Encoder");
 
     for(;;){
-        uint32_t encoder_position = HW_ENC_TIM->CNT;
+        encoder_position = HW_ENC_TIM->CNT;
         if(plotEnabled == true){
             update_plot(encoder_position);
         }
@@ -263,7 +261,7 @@ static void pas_plot_init(int argc, const char **argv)
     }
 }
 
-static void update_plot(uint32_t encoder_position)
+static void update_plot(uint32_t encoder_pos)
 {   
     static uint32_t cyclesCounter = 0U;
     cyclesCounter++;
@@ -273,7 +271,7 @@ static void update_plot(uint32_t encoder_position)
         float time = (float)((float)chVTGetSystemTimeX() / 10000.0F);
 
         commands_plot_set_graph(0);
-        commands_send_plot_points(time, (float)encoder_position);
+        commands_send_plot_points(time, (float)encoder_pos);
 
         commands_plot_set_graph(1);
         commands_send_plot_points(time, (float)angle_delta);

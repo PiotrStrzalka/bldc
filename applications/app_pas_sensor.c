@@ -8,7 +8,6 @@
 #include <stdio.h>
 
 #define NUM_BUFFERS 32
-//#define BUFFERS_SIZE 256
 
 typedef struct {
     uint32_t timestamp;
@@ -164,7 +163,7 @@ void calculateParams(void)
     }
 
     if(mov_current != mov_previous){
-        commands_printf("t:%.1fms Change %s -> %s", ((float)chVTGetSystemTime())/10.0f, movTypeToString(mov_previous), movTypeToString(mov_current));
+        // commands_printf("t:%.1fms Change %s -> %s", ((float)chVTGetSystemTime())/10.0f, movTypeToString(mov_previous), movTypeToString(mov_current));
         mov_previous = mov_current;
     }
     //commands_printf("%s, t:%.1fms d: %.1fms, pin %s, freq: %.2fHz | %.2fHz, Tu: %.1f, Td: %.1f, Tu/Td: %.1f | Tu/Td %.1f" ,
